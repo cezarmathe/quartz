@@ -1,0 +1,5 @@
+comment = 'horloge:  A PostgreSQL extension that introduces timers'
+default_version = '@CARGO_VERSION@'
+module_pathname = '$libdir/horloge'
+relocatable = false
+superuser = true
