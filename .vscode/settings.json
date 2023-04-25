@@ -1,0 +1,6 @@
+{
+    "cSpell.words": [
+        "horloge"
+    ],
+    "rust-analyzer.imports.granularity.group": "item",
+}

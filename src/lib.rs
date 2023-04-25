@@ -1,98 +1,58 @@
-use pgrx::bgworkers::*;
-use pgrx::datum::{FromDatum, IntoDatum};
-use pgrx::log;
+// src/lib.rs
+
+mod com;
+mod worker;
+
+use chrono::DateTime;
+use chrono::NaiveDateTime;
+use chrono::Utc;
+
+use pgrx::PgLwLock;
+use pgrx::pg_shmem_init;
 use pgrx::prelude::*;
-use std::time::Duration;
+use pgrx::shmem::*;
 
 pgrx::pg_module_magic!();
 
-/*
-    In order to use this bgworker with pgrx, you'll need to edit the proper `postgresql.conf` file in
-    `~/.pgrx/data-PGVER/postgresql.conf` and add this line to the end:
-
-    ```
-    shared_preload_libraries = 'bgworker.so'
-    ```
-
-    Background workers **must** be initialized in the extension's `_PG_init()` function, and can **only**
-    be started if loaded through the `shared_preload_libraries` configuration setting.
-
-    Executing `cargo pgrx run <PGVER>` will, when it restarts the specified Postgres instance, also start
-    this background worker
-*/
+pub static RUNTIME: PgLwLock<tokio::runtime::Runtime> = PgLwLock::new();
+pub static RUNTIME2: PgLwLock<i32> = PgLwLock::new();
 
 #[allow(non_snake_case)]
 #[pg_guard]
 pub extern "C" fn _PG_init() {
-    BackgroundWorkerBuilder::new("horloge")
-        .set_function("background_worker_main")
-        .set_library("horloge")
-        .set_argument(42i32.into_datum())
-        .enable_spi_access()
-        .load();
+    pg_shmem_init!(RUNTIME2);
+
+    worker::init();
 }
 
-#[pg_guard]
-#[no_mangle]
-pub extern "C" fn background_worker_main(arg: pg_sys::Datum) {
-    let arg = unsafe { i32::from_datum(arg, false) };
+// // (January 1, 2000, UTC) - (January 1, 1970, UTC) as seconds;
+// const PG_EPOCH_SECS: u128 = 946_708_560;
+// // (January 1, 2000, UTC) - (January 1, 1970, UTC) as microseconds;
+// const PG_EPOCH_MICROS: u128 = PG_EPOCH_SECS * 1_000_000;
 
-    // these are the signals we want to receive.  If we don't attach the SIGTERM handler, then
-    // we'll never be able to exit via an external notification
-    BackgroundWorker::attach_signal_handlers(SignalWakeFlags::SIGHUP | SignalWakeFlags::SIGTERM);
+#[pg_trigger]
+fn on_horloge_timers_event<'a>(trigger: &'a PgTrigger<'a>) -> Result<
+    Option<PgHeapTuple<'a, impl WhoAllocated>>,
+    PgHeapTupleError,
+> {
+    let now = Utc::now();
 
-    // we want to be able to use SPI against the specified table (postgres), as the user postgres
-    BackgroundWorker::connect_worker_to_spi(Some("postgres"), None);
+    let id = trigger.new().unwrap().get_by_name::<i64>("id").unwrap().unwrap();
+    let ts_pg = trigger.new().unwrap().get_by_name::<Timestamp>("ts").unwrap().unwrap();
 
-    log!(
-        "Background Worker '{}' is starting.  Argument={}",
-        BackgroundWorker::get_name(),
-        arg.unwrap()
-    );
+    let ts_i64 = Into::<i64>::into(ts_pg);
+    let ts = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp_micros(ts_i64).unwrap(), Utc);
 
-    // wake up every 10s or if we received a SIGTERM
-    while BackgroundWorker::wait_latch(Some(Duration::from_secs(10))) {
-        if BackgroundWorker::sighup_received() {
-            // on SIGHUP, you might want to reload some external configuration or something
-        }
+    // let ts_i64 = Into::<i64>::into(ts);
+    // let ts_u64 = u64::try_from(Into::<i64>::into(ts)).unwrap();
+    // let ts_u128 = u128::from(ts_u64) + PG_EPOCH_MICROS;
+    // let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_micros();
 
-        // within a transaction, execute an SQL statement, and log its results
-        BackgroundWorker::transaction(|| {
-            Spi::connect(|client| {
-                let tuple_table = client
-                    .select(
-                    "SELECT 'Hi', id, ''||a FROM (SELECT id, 42 from generate_series(1,10) id) a ",
-                    None,
-                    None,
-                    )
-                    .unwrap();
-                tuple_table.for_each(|tuple| {
-                    let a = tuple
-                        .get_datum_by_ordinal(1)
-                        .unwrap()
-                        .value::<String>()
-                        .unwrap()
-                        .unwrap();
-                    let b = tuple
-                        .get_datum_by_ordinal(2)
-                        .unwrap()
-                        .value::<i32>()
-                        .unwrap()
-                        .unwrap();
-                    let c = tuple
-                        .get_datum_by_ordinal(3)
-                        .unwrap()
-                        .value::<String>()
-                        .unwrap()
-                        .unwrap();
-                    log!("from bgworker: ({}, {}, {})", a, b, c);
-                });
-            });
-        });
+    panic!("ts={}, now={}", ts.timestamp_micros(), now.timestamp_micros());
+
+    if now >= ts_u128 {
+        error!("timer is in the past: now={}, new.ts={}", now, ts_u128);
     }
 
-    log!(
-        "Background Worker '{}' is exiting",
-        BackgroundWorker::get_name()
-    );
+    Ok(Some(trigger.new().or(trigger.old()).expect("neither \"new\" nor \"old\"")))
 }
