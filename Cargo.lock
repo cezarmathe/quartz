@@ -596,6 +596,8 @@ name = "horloge"
 version = "0.0.0"
 dependencies = [
  "chrono",
+ "heapless",
+ "once_cell",
  "pgrx",
  "pgrx-tests",
  "tokio",

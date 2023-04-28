@@ -1,26 +1,22 @@
 // src/lib.rs
 
 mod com;
+mod queue;
+// mod shmem;
 mod time;
+mod timer;
 mod worker;
 
 use chrono::Utc;
 
-use pgrx::PgLwLock;
-use pgrx::pg_shmem_init;
 use pgrx::prelude::*;
-use pgrx::shmem::*;
 
 pgrx::pg_module_magic!();
-
-pub static RUNTIME: PgLwLock<tokio::runtime::Runtime> = PgLwLock::new();
-pub static RUNTIME2: PgLwLock<i32> = PgLwLock::new();
 
 #[allow(non_snake_case)]
 #[pg_guard]
 pub extern "C" fn _PG_init() {
-    pg_shmem_init!(RUNTIME2);
-
+    timer::pg_init();
     worker::init();
 }
 
