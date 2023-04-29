@@ -1,7 +1,6 @@
 // src/lib.rs
 
 mod com;
-mod queue;
 // mod shmem;
 mod time;
 mod timer;
