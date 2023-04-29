@@ -14,28 +14,20 @@ use tokio::time::MissedTickBehavior;
 
 use std::time::Duration as StdDuration;
 
-use crate::queue::MpMcQueue;
-
 #[derive(Copy, Clone)]
 pub struct CreateTimer {
-    pub id: i64,                   // 8 bytes
+    pub id: i64, // 8 bytes
     pub ts: chrono::DateTime<Utc>, // 12 bytes
 
     // { NaiveDateTime { NaiveDate (i32 -> 4 bytes), NaiveTime { secs (u32 -> 4 bytes), frac (u32 -> 4 bytes) } }, Utc (0) }
 }
 
-// static QUEUE: PgLwLock<heapless::Vec<CreateTimer, 1_048_576>> = PgLwLock::new();
-static QUEUE: PgLwLock<MpMcQueue<CreateTimer, 128>> = PgLwLock::new();
-
-// I'VE FOUND THE ISSUE
-// APPARENTLY THERE IS A LIMIT TO SHMEM!
-// DUMB ASS
+static QUEUE: PgLwLock<heapless::Vec<CreateTimer, 128>> = PgLwLock::new();
 
 pub fn pg_init() {
     log!("horloge-timer: pg_init");
 
     pg_shmem_init!(QUEUE);
-
 
     BackgroundWorkerBuilder::new("horloge-timer")
         .set_library("horloge")
@@ -93,18 +85,24 @@ async fn run_timer() {
     };
 
     let on_poll_timers_interval = || {
-        let event = match QUEUE.share().dequeue() {
-            Some(event) => event,
-            None => return true,
-        };
+        let mut q = QUEUE.exclusive();
 
-        let duration = event.ts - Utc::now();
+        loop {
+            let event = match q.pop() {
+                Some(event) => event,
+                None => break
+            };
 
-        tokio::spawn(async move {
-            time::sleep(duration.to_std().unwrap()).await;
+            let duration = event.ts - Utc::now();
 
-            log!("timer {} fired", event.id);
-        });
+            // todo: get the abort handle and store it somewhere
+            tokio::spawn(async move {
+                time::sleep(duration.to_std().unwrap()).await;
+
+                log!("timer {} fired", event.id);
+            });
+        }
+
 
         true
     };
@@ -126,7 +124,11 @@ async fn run_timer() {
 }
 
 pub(crate) fn enqueue(event: CreateTimer) {
-    if QUEUE.share().enqueue(event).is_err() {
-        panic!("queue full");
+    const LOOPS: usize = 64;
+
+    for _ in 0..LOOPS {
+        if QUEUE.exclusive().push(event).is_ok() {
+            return;
+        }
     }
 }
