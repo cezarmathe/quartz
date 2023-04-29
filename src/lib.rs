@@ -31,7 +31,7 @@ fn on_horloge_timers_event<'a>(trigger: &'a PgTrigger<'a>) -> Result<
         error!("trigger fired by something other than insert");
     }
 
-    let _id = trigger.new().unwrap().get_by_name::<i64>("id").unwrap().unwrap();
+    let id = trigger.new().unwrap().get_by_name::<i64>("id").unwrap().unwrap();
     let ts_pg = trigger.new().unwrap().get_by_name::<Timestamp>("ts").unwrap().unwrap();
 
     let ts = time::pg_to_chrono(ts_pg);
@@ -41,6 +41,10 @@ fn on_horloge_timers_event<'a>(trigger: &'a PgTrigger<'a>) -> Result<
     }
 
     // do something with the timer
+    crate::timer::enqueue(crate::timer::CreateTimer {
+        id,
+        ts,
+    });
 
     Ok(Some(trigger.new().or(trigger.old()).expect("neither \"new\" nor \"old\"")))
 }

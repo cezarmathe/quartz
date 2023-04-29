@@ -1,6 +1,5 @@
 // src/timer.rs
 
-use chrono::Duration;
 use chrono::prelude::*;
 
 use pgrx::bgworkers::*;
@@ -19,40 +18,62 @@ use crate::queue::MpMcQueue;
 
 #[derive(Copy, Clone)]
 pub struct CreateTimer {
-    pub id: i64,
-    pub ts: chrono::DateTime<Utc>,
+    pub id: i64,                   // 8 bytes
+    pub ts: chrono::DateTime<Utc>, // 12 bytes
+
+    // { NaiveDateTime { NaiveDate (i32 -> 4 bytes), NaiveTime { secs (u32 -> 4 bytes), frac (u32 -> 4 bytes) } }, Utc (0) }
 }
 
-static QUEUE: PgLwLock<MpMcQueue<CreateTimer, 1_048_576>> = PgLwLock::new();
+// static QUEUE: PgLwLock<heapless::Vec<CreateTimer, 1_048_576>> = PgLwLock::new();
+static QUEUE: PgLwLock<MpMcQueue<CreateTimer, 128>> = PgLwLock::new();
+
+// I'VE FOUND THE ISSUE
+// APPARENTLY THERE IS A LIMIT TO SHMEM!
+// DUMB ASS
 
 pub fn pg_init() {
+    log!("horloge-timer: pg_init");
+
     pg_shmem_init!(QUEUE);
 
+
     BackgroundWorkerBuilder::new("horloge-timer")
-        .set_function("horloge_worker_main")
-        .set_argument(0.into_datum()) // can we use this for something?
         .set_library("horloge")
+        .set_function("horloge_timer_main")
+        .set_argument(0.into_datum()) // can we use this for something?
+        .set_type("horloge-timer")
+        .set_start_time(BgWorkerStartTime::PostmasterStart)
+        // .set_restart_time(StdDuration::from_secs(1).into())
+        .enable_shmem_access(None)
         .load();
 }
 
 #[pg_guard]
 #[no_mangle]
+pub unsafe extern "C" fn horloge_timer_on_shmem_access() {
+    log!("horloge-timer: shmem access");
+}
+
+#[pg_guard]
+#[no_mangle]
 pub extern "C" fn horloge_timer_main(_arg: pg_sys::Datum) {
+    log!("hello, this is horloge-timer");
+
     BackgroundWorker::attach_signal_handlers(SignalWakeFlags::SIGHUP | SignalWakeFlags::SIGTERM);
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_time()
-        // .event_interval(42)
+        .event_interval(61) // default - might want to optimize
         .max_blocking_threads(1)
         .build()
         .unwrap();
 
     runtime.block_on(self::run_timer());
+
+    log!("bye bye");
 }
 
 async fn run_timer() {
-    log!("hello, this is horloge-timer");
-
     let mut poll_term_interval = time::interval(StdDuration::from_secs(1));
     poll_term_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
@@ -72,7 +93,7 @@ async fn run_timer() {
     };
 
     let on_poll_timers_interval = || {
-        let event = match QUEUE.share().0.dequeue() {
+        let event = match QUEUE.share().dequeue() {
             Some(event) => event,
             None => return true,
         };
@@ -87,4 +108,25 @@ async fn run_timer() {
 
         true
     };
+
+    loop {
+        tokio::select! {
+            _ = poll_term_interval.tick() => {
+                if !on_poll_term_inverval() {
+                    break;
+                }
+            }
+            _ = poll_timers_interval.tick() => {
+                if !on_poll_timers_interval() {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+pub(crate) fn enqueue(event: CreateTimer) {
+    if QUEUE.share().enqueue(event).is_err() {
+        panic!("queue full");
+    }
 }
