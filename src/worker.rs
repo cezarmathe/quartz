@@ -11,7 +11,7 @@ use std::time::Duration;
 
 const WORKERS_COUNT: i32 = 1;
 
-pub(crate) fn init() {
+pub(crate) fn pg_init() {
     for i in 0..WORKERS_COUNT {
         BackgroundWorkerBuilder::new(format!("horloge-{}", i).as_str())
             .set_function("horloge_worker_main")

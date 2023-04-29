@@ -17,7 +17,7 @@ pgrx::pg_module_magic!();
 #[pg_guard]
 pub extern "C" fn _PG_init() {
     timer::pg_init();
-    worker::init();
+    worker::pg_init();
 }
 
 #[pg_trigger]
