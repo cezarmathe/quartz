@@ -12,12 +12,47 @@ use pgrx::PgLwLock;
 use tokio::time;
 use tokio::time::MissedTickBehavior;
 
+use std::error::Error;
 use std::time::Duration as StdDuration;
+
+// A timer. blah blah blah
+pub struct Timer {
+    // The ID of the timer.
+    pub id: i64,
+    // The timestamp at which the timer should fire.
+    pub exp_at: chrono::DateTime<Local>,
+    // The timestamp at which the timer fired, if it has expired.
+    pub fired_at: Option<chrono::DateTime<Local>>,
+    // The timestamp at which the timer firing was acknowledged, if it has been
+    // fired and the action has been successfully completed.
+    pub ack_at: Option<chrono::DateTime<Local>>,
+}
+
+impl<'a> TryFrom<PgHeapTuple<'static, AllocatedByPostgres>> for Timer {
+    type Error = Box<dyn Error>;
+
+    fn try_from(value: PgHeapTuple<'static, AllocatedByPostgres>) -> Result<Self, Self::Error> {
+        todo!()
+    }
+}
+
+// impl<'a> TryFrom<PgHeapTuple<'a, AllocatedByPostgres> for Timer {
+//     type Error = PgHeapTupleError;
+
+//     fn try_from(tuple: PgHeapTuple<'a, AllocatedByPostgres>) -> Result<Self, Self::Error> {
+//         let id = tuple.get_by_name::<i64>("id")?.unwrap();
+//         let ts_pg = tuple.get_by_name::<Timestamp>("ts")?.unwrap();
+
+//         let ts = crate::timestamp::pg_to_chrono(ts_pg);
+
+//         Ok(Timer { id, ts })
+//     }
+// }
 
 #[derive(Copy, Clone)]
 pub struct CreateTimer {
     pub id: i64, // 8 bytes
-    pub ts: chrono::DateTime<Utc>, // 12 bytes
+    pub ts: chrono::DateTime<Local>, // 12 bytes
 
     // { NaiveDateTime { NaiveDate (i32 -> 4 bytes), NaiveTime { secs (u32 -> 4 bytes), frac (u32 -> 4 bytes) } }, Utc (0) }
 }
@@ -93,7 +128,7 @@ async fn run_timer() {
                 None => break
             };
 
-            let duration = event.ts - Utc::now();
+            let duration = event.ts - Local::now();
 
             // todo: get the abort handle and store it somewhere
             tokio::spawn(async move {
