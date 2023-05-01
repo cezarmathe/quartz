@@ -1,10 +1,11 @@
 // src/lib.rs
 
 mod functions; // SQL functions.
+mod shmem;     // Shared memory.
 mod timer;     // Timer implementation.
 mod timestamp; // Timestamp conversion between Postgres and Chrono.
 mod triggers;  // Triggers for timer tables.
-mod worker;    // Background worker for timer execution.
+mod workers;   // Background worker for timer execution.
 
 use pgrx::prelude::*;
 
@@ -13,10 +14,8 @@ pgrx::pg_module_magic!();
 #[allow(non_snake_case)]
 #[pg_guard]
 pub extern "C" fn _PG_init() {
-    return;
-
-    timer::pg_init();  // Initialize timer sub-module.
-    worker::pg_init(); // Initialize worker sub-module.
+    workers::pg_init(); // Initialize workers sub-module.
+    timer::pg_init();   // Initialize timer sub-module.
 }
 
 /// This module manages the SQL schema for this extension, and the exported

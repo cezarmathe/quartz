@@ -84,7 +84,9 @@ pub fn horloge_timers_after_insert<'a>(
         }
     };
 
-    crate::timer::enqueue(new_timer);
+    if crate::timer::TimerHandle::enqueue_create_timer(new_timer).is_none() {
+        error!("failed to enqueue timer")
+    }
 
     Ok(Some(new_row))
 }
