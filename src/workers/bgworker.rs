@@ -53,7 +53,7 @@ async fn run_worker(handle: Worker) {
     };
 
     let on_poll_timers_interval = || {
-        let event = if let Some(value) = handle.dequeue_event() {
+        let event = if let Some(value) = handle.events.dequeue() {
             value
         } else {
             return;

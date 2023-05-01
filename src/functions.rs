@@ -5,13 +5,15 @@ use pgrx::spi::Error as SpiError;
 use pgrx::spi::SpiClient;
 
 pub fn create_timers_table(rel: &str) {
-    if let Err(e) = Spi::connect(|client| self::create_timers_table_with_client(client, rel)) {
+    if let Err(e) =
+        Spi::connect(|mut client| self::create_timers_table_with_client(&mut client, rel))
+    {
         error!("horloge_create_timers_table: {}", e);
     }
 }
 
 fn create_timers_table_with_client<'a>(
-    mut client: SpiClient<'a>,
+    client: &mut SpiClient<'a>,
     rel: &str,
 ) -> Result<(), SpiError> {
     let (schema, table) = rel
@@ -19,31 +21,33 @@ fn create_timers_table_with_client<'a>(
         .map(|(schema, table)| (Some(schema), table))
         .unwrap_or((None, rel));
 
-    let query = if let Some(schema) = schema {
-        format!(
-            r#"
-            create table {}."{}" (
-                    id unsigned bigint generated always as identity primary key,
-                    expires_at timestamp not null,
-                    fired_at timestamp,
-                    completed_at timestamp
-            );
-        "#,
-            schema, table
-        )
+    let fq = if let Some(schema) = schema {
+        format!("{}.\"{}\"", schema, table)
     } else {
-        format!(
-            r#"
-            create table "{}" (
-                    id unsigned bigint generated always as identity primary key,
-                    expires_at timestamp not null,
-                    fired_at timestamp,
-                    completed_at timestamp
-            );
-            "#,
-            table
-        )
+        format!("\"{}\"", table)
     };
+
+    let query = format!(
+        r#"
+            create table {} (
+                id bigint generated always as identity primary key,
+                expires_at timestamp not null,
+                fired_at timestamp,
+                completed_at timestamp
+            );
+
+            with table_oid as (
+                select c.oid
+                from pg_catalog.pg_class c
+                join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+                where c.relname = $1
+                and n.nspname = $2
+            )
+            insert into horloge.timer_relations (table_oid)
+            select oid from table_oid;
+        "#,
+        fq,
+    );
 
     client.update(query.as_str(), None, None).map(|_| ())?;
 
@@ -52,15 +56,15 @@ fn create_timers_table_with_client<'a>(
 
 pub fn drop_timers_table(rel: &str) {}
 
-fn drop_timers_table_with_client<'a>(mut client: SpiClient<'a>, rel: &str) {}
+fn drop_timers_table_with_client<'a>(client: &mut SpiClient<'a>, rel: &str) {}
 
 pub fn activate_timers(rel: &str) {
-    if let Err(e) = Spi::connect(|client| self::activate_timers_with_client(client, rel)) {
+    if let Err(e) = Spi::connect(|mut client| self::activate_timers_with_client(&mut client, rel)) {
         error!("horloge_activate_timers: {}", e);
     }
 }
 
-fn activate_timers_with_client<'a>(mut client: SpiClient<'a>, rel: &str) -> Result<(), SpiError> {
+fn activate_timers_with_client<'a>(client: &mut SpiClient<'a>, rel: &str) -> Result<(), SpiError> {
     let query = format!(
         r#"
         create or replace trigger horloge_timers_before_insert
@@ -95,12 +99,16 @@ fn activate_timers_with_client<'a>(mut client: SpiClient<'a>, rel: &str) -> Resu
 }
 
 pub fn deactivate_timers(rel: &str) {
-    if let Err(e) = Spi::connect(|client| self::deactivate_timers_with_client(client, rel)) {
+    if let Err(e) = Spi::connect(|mut client| self::deactivate_timers_with_client(&mut client, rel))
+    {
         error!("horloge_deactivate_timers: {}", e);
     }
 }
 
-fn deactivate_timers_with_client<'a>(mut client: SpiClient<'a>, rel: &str) -> Result<(), SpiError> {
+fn deactivate_timers_with_client<'a>(
+    client: &mut SpiClient<'a>,
+    rel: &str,
+) -> Result<(), SpiError> {
     let query = format!(
         r#"
         drop trigger if exists horloge_timers_before_insert on {};

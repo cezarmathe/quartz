@@ -6,8 +6,10 @@ use pgrx::prelude::*;
 
 use std::error::Error;
 
-// A timer. blah blah blah
-pub struct Timer {
+/// A row in a timer table.
+///
+/// This is agnostic towards the actual table that the timer is associated with.
+pub struct TimerRow {
     // The ID of the timer.
     pub id: i64,
 
@@ -22,7 +24,7 @@ pub struct Timer {
     pub completed_at: Option<chrono::DateTime<Local>>,
 }
 
-impl<'a> TryFrom<&'a PgHeapTuple<'a, AllocatedByPostgres>> for Timer {
+impl<'a> TryFrom<&'a PgHeapTuple<'a, AllocatedByPostgres>> for TimerRow {
     type Error = Box<dyn Error>;
 
     fn try_from(tuple: &'a PgHeapTuple<'a, AllocatedByPostgres>) -> Result<Self, Self::Error> {
@@ -67,17 +69,18 @@ impl<'a> TryFrom<&'a PgHeapTuple<'a, AllocatedByPostgres>> for Timer {
     }
 }
 
+/// Data for creating a timer from a row.
 #[derive(Copy, Clone)]
-pub struct CreateTimer {
+pub struct CreateTimerFromRow {
     pub id: i64, // 8 bytes
     pub expires_at: chrono::DateTime<Local>, // 12 bytes
 }
 
-impl<'a> TryFrom<&'a PgHeapTuple<'a, AllocatedByPostgres>> for CreateTimer {
+impl<'a> TryFrom<&'a PgHeapTuple<'a, AllocatedByPostgres>> for CreateTimerFromRow {
     type Error = Box<dyn Error>;
 
     fn try_from(value: &'a PgHeapTuple<'a, AllocatedByPostgres>) -> Result<Self, Self::Error> {
-        let timer = Timer::try_from(value)?;
+        let timer = TimerRow::try_from(value)?;
 
         if timer.fired_at.is_some() {
             return Err("creating a fired timer is forbidden".into());

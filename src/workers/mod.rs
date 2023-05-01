@@ -4,7 +4,6 @@ mod bgworker;
 
 use heapless::mpmc::MpMcQueue;
 
-use once_cell::sync::OnceCell;
 use pgrx::bgworkers::*;
 use pgrx::log;
 use pgrx::pg_shmem_init;
@@ -13,8 +12,7 @@ use pgrx::shmem::*;
 
 use crate::shmem::SharedObject;
 
-static WORKER_QUEUE: SharedObject<MpMcQueue<(), 128>> = SharedObject::new("horloge-workers-queue");
-
+/// Initialize the workers subsystem.
 pub(crate) fn pg_init() {
     log!("horloge-workers: pg_init");
 
@@ -41,28 +39,47 @@ pub(crate) fn pg_init() {
     }
 }
 
+/// The shared queue used for communicating events to the workers subsystem.
+static WORKER_QUEUE: SharedObject<MpMcQueue<WorkerSubsystemEvent, 128>> = SharedObject::new("horloge-workers-queue");
+
+/// WorkerEvent is an event that can be sent to the workers subsystem.
+pub enum WorkerSubsystemEvent {
+    TimerFired(TimerFiredEvent),
+}
+
+/// TimerFiredEvent is an event that is sent to a worker when a timer fires.
+pub struct TimerFiredEvent {
+    /// The OID of the pg_class that the timer is associated with.
+    ///
+    /// This is always an OID of a table.
+    pub pg_class_oid: pg_sys::Oid,
+}
+
+/// WorkersHandle is a handle used for interacting with the workers subsystem.
+///
+/// WorkersHandle is not usable prior to the initialization of the workers
+/// subsystem.
 pub struct WorkersHandle;
 
 impl WorkersHandle {
-    pub fn enqueue_event() -> bool {
-        WORKER_QUEUE.get().enqueue(()).is_ok()
+    /// Enqueue an event to be processed by the workers subsystem.
+    pub fn enqueue_event(event: WorkerSubsystemEvent) -> bool {
+        WORKER_QUEUE.get().enqueue(event).is_ok()
     }
 }
 
 pub(self) struct Worker {
     worker_id: i32,
-    queue: &'static SharedObject<MpMcQueue<(), 128>>,
+    events: &'static MpMcQueue<WorkerSubsystemEvent, 128>,
 }
 
 impl Worker {
     pub fn new(worker_id: i32) -> Self {
         Self {
             worker_id,
-            queue: &WORKER_QUEUE,
+            events: WORKER_QUEUE.get()
         }
     }
 
-    pub fn dequeue_event(&self) -> Option<()> {
-        self.queue.get().dequeue()
-    }
+    async fn main(self) {}
 }

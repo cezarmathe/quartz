@@ -6,9 +6,15 @@ mod shmem;     /// Shared memory.
 mod timer;     /// Timer implementation.
 mod timestamp; /// Timestamp conversion between Postgres and Chrono.
 mod triggers;  /// Triggers for timer tables.
+mod types;     /// Common types.
 mod workers;   /// Background worker for timer execution.
 
 use pgrx::prelude::*;
+
+pgrx::extension_sql_file!(
+    "../sql/init.sql",
+    name = "init", // fixme: Why does pgrx panic on "sql/init.sql"?
+);
 
 pgrx::pg_module_magic!();
 
@@ -68,5 +74,17 @@ mod horloge {
     #[pg_extern]
     fn deactivate_timers(rel: &str) {
         crate::functions::deactivate_timers(rel)
+    }
+
+    /// Create a timers table with the given name.
+    ///
+    /// Relation can be:
+    ///
+    /// - **schema**.**table** - fully qualified
+    /// - **table**            - assumes current schema
+    #[pg_guard]
+    #[pg_extern]
+    fn create_timers_table(rel: &str) {
+        crate::functions::create_timers_table(rel)
     }
 }

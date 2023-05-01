@@ -35,7 +35,7 @@ impl<T> SharedObject<T> {
     }
 
     /// Get a reference to the value attached to this shared object.
-    pub fn get(&self) -> &T {
+    pub fn get(&self) -> &'static T {
         unsafe {
             self.inner
                 .get()

@@ -3,7 +3,8 @@
 use chrono::prelude::*;
 use pgrx::prelude::*;
 
-use crate::timer::CreateTimer;
+use crate::timer::TimerSubsystemEvent;
+use crate::types::CreateTimerFromRow;
 
 use std::convert::TryFrom;
 
@@ -42,7 +43,7 @@ pub fn horloge_timers_before_insert<'a>(
         .new()
         .expect("before insert trigger must have \"new\"");
 
-    let new_timer = match CreateTimer::try_from(&new_row) {
+    let new_timer = match CreateTimerFromRow::try_from(&new_row) {
         Ok(value) => value,
         Err(e) => {
             error!("create new timer: {}", e);
@@ -77,14 +78,24 @@ pub fn horloge_timers_after_insert<'a>(
         .new()
         .expect("before insert trigger must have \"new\"");
 
-    let new_timer = match CreateTimer::try_from(&new_row) {
+    let new_timer = match CreateTimerFromRow::try_from(&new_row) {
         Ok(value) => value,
         Err(e) => {
             error!("create new timer: {}", e);
         }
     };
 
-    if crate::timer::TimerHandle::enqueue_create_timer(new_timer).is_none() {
+    let relation_oid = match trigger.relation().map(|rel| rel.oid()) {
+        Ok(value) => value,
+        Err(e) => error!("horloge_timers_after_insert: relation ID is unexpectedly unavailable: {}", e),
+    };
+
+    let event = TimerSubsystemEvent::CreateTimer {
+        table_oid: relation_oid,
+        table_row: new_timer,
+    };
+
+    if !crate::timer::TimerHandle::enqueue_event(event) {
         error!("failed to enqueue timer")
     }
 
