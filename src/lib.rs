@@ -1,11 +1,12 @@
 // src/lib.rs
 
-mod functions; // SQL functions.
-mod shmem;     // Shared memory.
-mod timer;     // Timer implementation.
-mod timestamp; // Timestamp conversion between Postgres and Chrono.
-mod triggers;  // Triggers for timer tables.
-mod workers;   // Background worker for timer execution.
+mod commands;  /// Internal SQL query commands wrapping SPI calls.
+mod functions; /// SQL functions.
+mod shmem;     /// Shared memory.
+mod timer;     /// Timer implementation.
+mod timestamp; /// Timestamp conversion between Postgres and Chrono.
+mod triggers;  /// Triggers for timer tables.
+mod workers;   /// Background worker for timer execution.
 
 use pgrx::prelude::*;
 
@@ -45,12 +46,24 @@ mod horloge {
         horloge_timers_after_delete  => crate::triggers::horloge_timers_after_delete
     }
 
+    /// Activate timers for a relation.
+    ///
+    /// Relation can be:
+    ///
+    /// - **schema**.**table** - fully qualified
+    /// - **table**            - assumes current schema
     #[pg_guard]
     #[pg_extern]
     fn activate_timers(rel: &str) {
         crate::functions::activate_timers(rel)
     }
 
+    /// Deactivate timers for a relation.
+    ///
+    /// Relation can be:
+    ///
+    /// - **schema**.**table** - fully qualified
+    /// - **table**            - assumes current schema
     #[pg_guard]
     #[pg_extern]
     fn deactivate_timers(rel: &str) {
