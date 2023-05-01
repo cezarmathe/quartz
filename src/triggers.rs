@@ -3,6 +3,14 @@
 use chrono::prelude::*;
 use pgrx::prelude::*;
 
+use crate::timer::CreateTimer;
+
+use std::convert::TryFrom;
+
+/// A result returned by a trigger function.
+pub type TriggerResult<'a, WhoAllocated> =
+    Result<Option<PgHeapTuple<'a, WhoAllocated>>, PgHeapTupleError>;
+
 // Assert that a trigger event matches the provided conditions (as functions on
 // the event type itself). Failures are logged at the ERROR level in Postgres,
 // thereby causing the trigger to fail.
@@ -16,10 +24,9 @@ macro_rules! assert_row_trigger_event {
     };
 }
 
-#[pg_trigger]
-fn horloge_timers_before_insert<'a>(
+pub fn horloge_timers_before_insert<'a>(
     trigger: &'a PgTrigger<'a>,
-) -> Result<Option<PgHeapTuple<'a, impl WhoAllocated>>, PgHeapTupleError> {
+) -> TriggerResult<'a, impl WhoAllocated> {
     let now = Local::now();
 
     assert_row_trigger_event!(
@@ -31,46 +38,32 @@ fn horloge_timers_before_insert<'a>(
         }
     );
 
-    // todo: validation
-    // - parse Timer out of new
-    // - ensure only ID and TS are set
-    // - ensure TS is in the future
-    // - ensure ID is unique
-
-    let id = trigger
+    let new_row = trigger
         .new()
-        .unwrap()
-        .get_by_name::<i64>("id")
-        .unwrap()
-        .unwrap();
-    let ts_pg = trigger
-        .new()
-        .unwrap()
-        .get_by_name::<Timestamp>("ts")
-        .unwrap()
-        .unwrap();
+        .expect("before insert trigger must have \"new\"");
 
-    let ts = crate::timestamp::pg_to_chrono(ts_pg);
+    let new_timer = match CreateTimer::try_from(&new_row) {
+        Ok(value) => value,
+        Err(e) => {
+            error!("create new timer: {}", e);
+        }
+    };
 
-    if now >= ts {
-        error!("timer is in the past: now={}, new.ts={}", now, ts);
+    // fixme: ensure that timers are unique across schemas and tables
+
+    if now >= new_timer.expires_at {
+        error!(
+            "timer is in the past: now={}, new.ts={}",
+            now, new_timer.expires_at
+        );
     }
 
-    // do something with the timer
-    crate::timer::enqueue(crate::timer::CreateTimer { id, ts });
-
-    Ok(Some(
-        trigger
-            .new()
-            .or(trigger.old())
-            .expect("neither \"new\" nor \"old\""),
-    ))
+    Ok(Some(new_row))
 }
 
-#[pg_trigger]
-fn horloge_timers_after_insert<'a>(
+pub fn horloge_timers_after_insert<'a>(
     trigger: &'a PgTrigger<'a>,
-) -> Result<Option<PgHeapTuple<'a, impl WhoAllocated>>, PgHeapTupleError> {
+) -> TriggerResult<'a, impl WhoAllocated> {
     assert_row_trigger_event!(
         trigger.event(),
         horloge_timers_after_insert => {
@@ -80,19 +73,25 @@ fn horloge_timers_after_insert<'a>(
         }
     );
 
-    // todo: queue
-    // - parse Timer out of new
-    // - ensure only ID and TS are set
-    // - ensure ID is unique?
-    // - enqueue timer to be added
+    let new_row = trigger
+        .new()
+        .expect("before insert trigger must have \"new\"");
 
-    Ok(trigger.new())
+    let new_timer = match CreateTimer::try_from(&new_row) {
+        Ok(value) => value,
+        Err(e) => {
+            error!("create new timer: {}", e);
+        }
+    };
+
+    crate::timer::enqueue(new_timer);
+
+    Ok(Some(new_row))
 }
 
-#[pg_trigger]
-fn horloge_timers_before_update<'a>(
+pub fn horloge_timers_before_update<'a>(
     trigger: &'a PgTrigger<'a>,
-) -> Result<Option<PgHeapTuple<'a, impl WhoAllocated>>, PgHeapTupleError> {
+) -> TriggerResult<'a, impl WhoAllocated> {
     assert_row_trigger_event!(
         trigger.event(),
         horloge_timers_before_update => {
@@ -111,10 +110,9 @@ fn horloge_timers_before_update<'a>(
     Ok(trigger.new())
 }
 
-#[pg_trigger]
-fn horloge_timers_after_update<'a>(
+pub fn horloge_timers_after_update<'a>(
     trigger: &'a PgTrigger<'a>,
-) -> Result<Option<PgHeapTuple<'a, impl WhoAllocated>>, PgHeapTupleError> {
+) -> TriggerResult<'a, impl WhoAllocated> {
     assert_row_trigger_event!(
         trigger.event(),
         horloge_timers_before_update => {
@@ -135,10 +133,9 @@ fn horloge_timers_after_update<'a>(
     Ok(trigger.new())
 }
 
-#[pg_trigger]
-fn horloge_timers_before_delete<'a>(
+pub fn horloge_timers_before_delete<'a>(
     trigger: &'a PgTrigger<'a>,
-) -> Result<Option<PgHeapTuple<'a, impl WhoAllocated>>, PgHeapTupleError> {
+) -> TriggerResult<'a, impl WhoAllocated> {
     assert_row_trigger_event!(
         trigger.event(),
         horloge_timers_before_update => {
@@ -156,10 +153,9 @@ fn horloge_timers_before_delete<'a>(
     Ok(trigger.old())
 }
 
-#[pg_trigger]
-fn horloge_timers_after_delete<'a>(
+pub fn horloge_timers_after_delete<'a>(
     trigger: &'a PgTrigger<'a>,
-) -> Result<Option<PgHeapTuple<'a, impl WhoAllocated>>, PgHeapTupleError> {
+) -> TriggerResult<'a, impl WhoAllocated> {
     assert_row_trigger_event!(
         trigger.event(),
         horloge_timers_before_update => {
