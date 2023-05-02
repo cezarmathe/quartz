@@ -2,15 +2,15 @@
 --- src/init.sql
 ---
 
-create table if not exists horloge.timer_tables (
-    relid oid primary key references pg_class
+create table horloge.timer_relations (
+    relid oid primary key
 );
 
-create or replace function horloge.ensure_relid_is_table()
+create function horloge.check_relation_is_table()
 returns trigger
 as $$
 begin
-    if (TG_TABLE_SCHEMA != 'horloge' or TG_TABLE_NAME != 'timer_tables') then
+    if (TG_TABLE_SCHEMA != 'horloge' or TG_TABLE_NAME != 'timer_relations') then
         raise exception 'horloge.ensure_relid_is_table(): must be used only on the "horloge.timer_tables" table';
     end if;
 
@@ -23,6 +23,6 @@ begin
 end;
 $$ language plpgsql;
 
-create trigger ensure_relid_is_table
-    before insert or update on horloge.timer_tables
-    for each row execute function horloge.ensure_relid_is_table();
+create trigger check_relation_is_table
+    before insert or update on horloge.timer_relations
+    for each row execute function horloge.check_relation_is_table();

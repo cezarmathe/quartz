@@ -9,6 +9,9 @@ use tokio::time::MissedTickBehavior;
 
 use std::time::Duration;
 
+use crate::workers::TimerFiredEvent;
+use crate::workers::WorkerSubsystemEvent;
+
 use super::Worker;
 
 #[pg_guard]
@@ -60,6 +63,13 @@ async fn run_worker(handle: Worker) {
         };
 
         log!("horloge-worker-{}: got event", handle.worker_id);
+
+        use WorkerSubsystemEvent::*;
+        match event {
+            TimerFired(event) => {
+                log!("horloge-worker-{}: timer {}:{} fired", handle.worker_id, event.table_oid, event.row.id);
+            }
+        }
     };
 
     loop {

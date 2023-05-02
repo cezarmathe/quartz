@@ -10,13 +10,20 @@ use pgrx::pg_sys::Oid;
 use pgrx::prelude::*;
 use pgrx::shmem::*;
 
+use pgrx::spi::Error as SpiError;
+use tokio::task::AbortHandle;
 use tokio::time;
 use tokio::time::MissedTickBehavior;
 
+use std::collections::HashMap;
 use std::time::Duration as StdDuration;
 
+use crate::config;
 use crate::shmem::SharedObject;
 use crate::types::*;
+use crate::workers::TimerFiredEvent;
+use crate::workers::WorkerSubsystemEvent;
+use crate::workers::WorkersHandle;
 
 /// Initialize the timer subsystem.
 pub fn pg_init() {
@@ -32,7 +39,7 @@ pub fn pg_init() {
         .set_start_time(BgWorkerStartTime::RecoveryFinished)
         .set_restart_time(StdDuration::from_secs(1).into())
         .enable_shmem_access(None)
-        .enable_spi_access() // fixme: use me
+        .enable_spi_access()
         .load();
 }
 
@@ -51,6 +58,12 @@ pub enum TimerSubsystemEvent {
         table_oid: Oid,
         /// The row that was inserted into the table.
         table_row: CreateTimerFromRow,
+    },
+    ExpireTimer {
+        /// The OID of the table that the timer is associated with.
+        table_oid: Oid,
+        /// The ID of the timer that should be expired.
+        timer_id: i64,
     },
 }
 
@@ -91,9 +104,17 @@ pub extern "C" fn horloge_timer_main(_arg: pg_sys::Datum) {
     log!("horloge-timer: starting");
 
     BackgroundWorker::attach_signal_handlers(SignalWakeFlags::SIGHUP | SignalWakeFlags::SIGTERM);
+    BackgroundWorker::connect_worker_to_spi(config::SPI_DATABASE_NAME, config::SPI_USER_NAME);
 
     let mut timer = Timer::new(TIMER_EVENTS_QUEUE.get());
-    // fixme: load existing timers
+
+    if let Err(e) = timer.initialize_extension() {
+        error!("horloge-timer: failed to initialize schema: {}", e);
+    }
+
+    if let Err(e) = timer.load_existing_timers() {
+        error!("horloge-timer: failed to load existing timers: {}", e);
+    }
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_time()
@@ -107,15 +128,42 @@ pub extern "C" fn horloge_timer_main(_arg: pg_sys::Datum) {
     log!("horloge-timer: bye bye");
 }
 
+struct TimerEntry {
+    oid: Oid,
+    row: TimerRow,
+    handle: AbortHandle,
+}
+
 /// The timer subsystem.
 struct Timer {
+    timers: HashMap<Oid, HashMap<i64, TimerEntry>>,
     queue: &'static TimerEventsQueueType,
+    workers_handle: WorkersHandle,
 }
 
 impl Timer {
     /// Create a new timer subsystem.
     fn new(queue: &'static TimerEventsQueueType) -> Self {
-        Self { queue }
+        Self {
+            timers: HashMap::new(),
+            queue,
+            workers_handle: WorkersHandle::get(),
+        }
+    }
+
+    /// Initialize the schema for the timer subsystem.
+    fn initialize_extension(&mut self) -> Result<(), SpiError> {
+        BackgroundWorker::transaction(|| {
+            Spi::connect(|mut client| {
+                client.update("create extension if not exists horloge", None, None)
+            })
+            .map(|_| ())
+        })
+    }
+
+    fn load_existing_timers(&mut self) -> Result<(), SpiError> {
+        // fixme
+        Ok(())
     }
 
     /// Run the timer subsystem.
@@ -138,25 +186,23 @@ impl Timer {
             true
         };
 
-        let on_poll_timers_interval = || {
+        let mut on_poll_timers_interval = || {
             loop {
-                let (table_oid, table_row) = match self.queue.dequeue() {
-                    Some(TimerSubsystemEvent::CreateTimer { table_oid, table_row }) => (
+                match self.queue.dequeue() {
+                    Some(TimerSubsystemEvent::CreateTimer {
                         table_oid,
                         table_row,
-                    ),
-                    Some(_) => todo!("handle other events"),
+                    }) => {
+                        self.create_timer(table_oid, table_row);
+                    }
+                    Some(TimerSubsystemEvent::ExpireTimer {
+                        table_oid,
+                        timer_id,
+                    }) => {
+                        self.expire_timer(table_oid, timer_id);
+                    }
                     None => break,
                 };
-
-                let duration = table_row.expires_at - Local::now();
-
-                // todo: get the abort handle and store it somewhere
-                tokio::spawn(async move {
-                    time::sleep(duration.to_std().unwrap()).await;
-
-                    log!("timer {} fired", table_row.id);
-                });
             }
 
             true
@@ -175,6 +221,45 @@ impl Timer {
                     }
                 }
             }
+        }
+    }
+
+    fn create_timer(&mut self, oid: Oid, row: CreateTimerFromRow) {
+        let scoped_timers = self.timers.entry(oid).or_insert_with(Default::default);
+
+        if scoped_timers.contains_key(&row.id) {
+            error!("timer {} already exists", row.id);
+        }
+
+        let handle = tokio::spawn(async move {
+            let duration = row.expires_at - Local::now();
+
+            time::sleep(duration.to_std().unwrap()).await;
+
+            TimerHandle::enqueue_event(TimerSubsystemEvent::ExpireTimer {
+                table_oid: oid,
+                timer_id: row.id,
+            });
+        })
+        .abort_handle();
+
+        let row: TimerRow = row.into();
+
+        scoped_timers.insert(row.id, TimerEntry { oid, row, handle });
+    }
+
+    fn expire_timer(&mut self, oid: Oid, id: i64) {
+        let scoped_timers = self.timers.entry(oid).or_insert_with(Default::default);
+
+        if let Some(entry) = scoped_timers.remove(&id) {
+            let event = TimerFiredEvent {
+                table_oid:  entry.oid,
+                row:        entry.row,
+            };
+
+            self.workers_handle.enqueue_event(WorkerSubsystemEvent::TimerFired(event));
+        } else {
+            error!("timer {} does not exist", id)
         }
     }
 }

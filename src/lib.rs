@@ -1,6 +1,7 @@
 // src/lib.rs
 
 mod commands;  /// Internal SQL query commands wrapping SPI calls.
+mod config;    /// Configuration for the horloge extension.
 mod functions; /// SQL functions.
 mod shmem;     /// Shared memory.
 mod timer;     /// Timer implementation.

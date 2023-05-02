@@ -114,6 +114,8 @@ pub fn horloge_timers_before_update<'a>(
         }
     );
 
+    notice!("horloge.horloge_timers_before_update: updates are not yet supported");
+
     // todo: validate
     // - parse Timer out of new
     // - ensure ID is not changed
@@ -134,6 +136,8 @@ pub fn horloge_timers_after_update<'a>(
             fired_for_row
         }
     );
+
+    notice!("horloge.horloge_timers_after_update: updates are not yet supported");
 
     // todo: queue update
     // - parse Timer out of new
@@ -158,6 +162,8 @@ pub fn horloge_timers_before_delete<'a>(
         }
     );
 
+    notice!("horloge.horloge_timers_before_delete: deletes are not yet supported");
+
     // todo: validate
     // - parse Timer out of old
     // - check that ID exists
@@ -177,6 +183,8 @@ pub fn horloge_timers_after_delete<'a>(
             fired_for_row
         }
     );
+
+    notice!("horloge.horloge_timers_after_delete: deletes are not yet supported");
 
     // todo: queue delete
     // - parse Timer out of old

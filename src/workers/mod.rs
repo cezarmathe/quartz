@@ -7,10 +7,12 @@ use heapless::mpmc::MpMcQueue;
 use pgrx::bgworkers::*;
 use pgrx::log;
 use pgrx::pg_shmem_init;
+use pgrx::pg_sys::Oid;
 use pgrx::prelude::*;
 use pgrx::shmem::*;
 
 use crate::shmem::SharedObject;
+use crate::types::TimerRow;
 
 /// Initialize the workers subsystem.
 pub(crate) fn pg_init() {
@@ -28,7 +30,7 @@ pub(crate) fn pg_init() {
     };
 
     for i in 0..worker_count {
-        BackgroundWorkerBuilder::new(format!("horloge-worker-{}", worker_count).as_str())
+        BackgroundWorkerBuilder::new(format!("horloge-worker-{}", i).as_str())
             .set_function("horloge_worker_main")
             .set_argument((i as i32).into_datum()) // worker ID
             .set_library("horloge")
@@ -49,21 +51,23 @@ pub enum WorkerSubsystemEvent {
 
 /// TimerFiredEvent is an event that is sent to a worker when a timer fires.
 pub struct TimerFiredEvent {
-    /// The OID of the pg_class that the timer is associated with.
-    ///
-    /// This is always an OID of a table.
-    pub pg_class_oid: pg_sys::Oid,
+    pub table_oid: Oid,
+    pub row: TimerRow,
 }
 
 /// WorkersHandle is a handle used for interacting with the workers subsystem.
 ///
 /// WorkersHandle is not usable prior to the initialization of the workers
 /// subsystem.
-pub struct WorkersHandle;
+pub struct WorkersHandle(());
 
 impl WorkersHandle {
+    pub fn get() -> Self {
+        Self(())
+    }
+
     /// Enqueue an event to be processed by the workers subsystem.
-    pub fn enqueue_event(event: WorkerSubsystemEvent) -> bool {
+    pub fn enqueue_event(&self, event: WorkerSubsystemEvent) -> bool {
         WORKER_QUEUE.get().enqueue(event).is_ok()
     }
 }

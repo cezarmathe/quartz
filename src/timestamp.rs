@@ -15,12 +15,12 @@ pub fn pg_to_chrono(ts: Timestamp) -> DateTime<Local> {
     let ts_i64 = Into::<i64>::into(ts);
     let naive_ts = NaiveDateTime::from_timestamp_micros(ts_i64 + PG_EPOCH_MICROS)
         .expect("pg_timestamp_to_chrono: timestamp out of range");
-    Local.from_local_datetime(&naive_ts).unwrap()
+    Local.from_utc_datetime(&naive_ts)
 }
 
 // chrono_to_pg converts a chrono::DateTime<Local> to a pgrx::Timestamp.
 pub fn chrono_to_pg(ts: DateTime<Local>) -> Timestamp {
-    let naive_ts = ts.naive_local();
+    let naive_ts = ts.naive_local(); // fixme: convert back to UTC
     let ts_i64 = naive_ts.timestamp_micros() - PG_EPOCH_MICROS;
     Timestamp::try_from(ts_i64)
         .expect("chrono_to_pg_timestamp: timestamp out of range")

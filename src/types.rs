@@ -96,3 +96,14 @@ impl<'a> TryFrom<&'a PgHeapTuple<'a, AllocatedByPostgres>> for CreateTimerFromRo
         })
     }
 }
+
+impl From<CreateTimerFromRow> for TimerRow {
+    fn from(value: CreateTimerFromRow) -> Self {
+        Self {
+            id: value.id,
+            expires_at: value.expires_at,
+            fired_at: None,
+            completed_at: None,
+        }
+    }
+}
