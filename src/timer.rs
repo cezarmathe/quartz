@@ -18,6 +18,8 @@ use tokio::time::MissedTickBehavior;
 use std::collections::HashMap;
 use std::time::Duration as StdDuration;
 
+use crate::commands;
+use crate::commands::TimerTableData;
 use crate::config;
 use crate::shmem::SharedObject;
 use crate::types::*;
@@ -59,11 +61,22 @@ pub enum TimerSubsystemEvent {
         /// The row that was inserted into the table.
         table_row: CreateTimerFromRow,
     },
+    /// Process the expiration of a timer.
     ExpireTimer {
         /// The OID of the table that the timer is associated with.
         table_oid: Oid,
         /// The ID of the timer that should be expired.
         timer_id: i64,
+    },
+    /// Track a new timers table.
+    TrackTimersTable {
+        /// The OID of the table that should be tracked.
+        table_oid: Oid,
+    },
+    /// Untrack a timers table.
+    UntrackTimersTable {
+        /// The OID of the table that should be untracked.
+        table_oid: Oid,
     },
 }
 
@@ -71,16 +84,22 @@ pub enum TimerSubsystemEvent {
 ///
 /// TimerHandle is not usable prior to the initialization of the timer
 /// subsystem.
-pub struct TimerHandle;
+#[derive(Clone, Copy)]
+pub struct TimerHandle(());
 
 impl TimerHandle {
+    /// Create a new timer handle.
+    pub fn get() -> Self {
+        Self(())
+    }
+
     /// Enqueue an event to be processed by the timer subsystem.
     ///
     /// This function will loop a few times if the queue is full, to give the
     /// background worker a chance to dequeue some events.
     ///
     /// Returns the ID of the timer if the event was successfully enqueued.
-    pub fn enqueue_event(mut event: TimerSubsystemEvent) -> bool {
+    pub fn enqueue_event(&self, mut event: TimerSubsystemEvent) -> bool {
         const LOOPS: usize = 64;
 
         for _ in 0..LOOPS {
@@ -112,8 +131,8 @@ pub extern "C" fn horloge_timer_main(_arg: pg_sys::Datum) {
         error!("horloge-timer: failed to initialize schema: {}", e);
     }
 
-    if let Err(e) = timer.load_existing_timers() {
-        error!("horloge-timer: failed to load existing timers: {}", e);
+    if let Err(e) = timer.initialize() {
+        error!("horloge-timer: failed to initialize: {}", e);
     }
 
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -128,6 +147,8 @@ pub extern "C" fn horloge_timer_main(_arg: pg_sys::Datum) {
     log!("horloge-timer: bye bye");
 }
 
+/// A timer entry is an entry in the timer subsystem that tracks the time for
+/// a row in a table, as indicated by the table's OID and the row's ID.
 struct TimerEntry {
     oid: Oid,
     row: TimerRow,
@@ -136,8 +157,9 @@ struct TimerEntry {
 
 /// The timer subsystem.
 struct Timer {
-    timers: HashMap<Oid, HashMap<i64, TimerEntry>>,
     queue: &'static TimerEventsQueueType,
+    timer_handle: TimerHandle,
+    timers: HashMap<Oid, HashMap<i64, TimerEntry>>,
     workers_handle: WorkersHandle,
 }
 
@@ -145,8 +167,9 @@ impl Timer {
     /// Create a new timer subsystem.
     fn new(queue: &'static TimerEventsQueueType) -> Self {
         Self {
-            timers: HashMap::new(),
             queue,
+            timer_handle: TimerHandle::get(),
+            timers: HashMap::new(),
             workers_handle: WorkersHandle::get(),
         }
     }
@@ -161,9 +184,53 @@ impl Timer {
         })
     }
 
-    fn load_existing_timers(&mut self) -> Result<(), SpiError> {
-        // fixme
-        Ok(())
+    fn initialize(&mut self) -> Result<(), SpiError> {
+        let timer_handle = self.timer_handle.clone();
+
+        BackgroundWorker::transaction(|| {
+            let timer_tables = Spi::connect(|client| commands::find_timer_tables(&client))?;
+
+            warning!("quartz-timer: found {} timer tables", timer_tables.len());
+
+            for timer_table in timer_tables {
+                let TimerTableData {
+                    relid,
+                    schema,
+                    table,
+                } = timer_table;
+
+                if !timer_handle
+                    .enqueue_event(TimerSubsystemEvent::TrackTimersTable { table_oid: relid })
+                {
+                    error!("failed to enqueue event");
+                }
+
+                let timers = Spi::connect(|client| {
+                    commands::find_timers_in_table(&client, schema.as_str(), table.as_str())
+                })?;
+
+                warning!(
+                    "quartz-timer: found {} timers in table {}",
+                    timers.len(),
+                    table
+                );
+
+                for timer in timers {
+                    if timer.fired_at.is_some() {
+                        continue;
+                    }
+
+                    if !timer_handle.enqueue_event(TimerSubsystemEvent::CreateTimer {
+                        table_oid: relid,
+                        table_row: timer.into(),
+                    }) {
+                        error!("failed to enqueue event");
+                    }
+                }
+            }
+
+            Ok(())
+        })
     }
 
     /// Run the timer subsystem.
@@ -189,17 +256,10 @@ impl Timer {
         let mut on_poll_timers_interval = || {
             loop {
                 match self.queue.dequeue() {
-                    Some(TimerSubsystemEvent::CreateTimer {
-                        table_oid,
-                        table_row,
-                    }) => {
-                        self.create_timer(table_oid, table_row);
-                    }
-                    Some(TimerSubsystemEvent::ExpireTimer {
-                        table_oid,
-                        timer_id,
-                    }) => {
-                        self.expire_timer(table_oid, timer_id);
+                    Some(event) => {
+                        if !self.process_event(event) {
+                            return false;
+                        }
                     }
                     None => break,
                 };
@@ -224,19 +284,62 @@ impl Timer {
         }
     }
 
-    fn create_timer(&mut self, oid: Oid, row: CreateTimerFromRow) {
-        let scoped_timers = self.timers.entry(oid).or_insert_with(Default::default);
-
-        if scoped_timers.contains_key(&row.id) {
-            error!("timer {} already exists", row.id);
+    fn process_event(&mut self, event: TimerSubsystemEvent) -> bool {
+        match event {
+            TimerSubsystemEvent::CreateTimer {
+                table_oid,
+                table_row,
+            } => {
+                self.create_timer(table_oid, table_row);
+            }
+            TimerSubsystemEvent::ExpireTimer {
+                table_oid,
+                timer_id,
+            } => {
+                self.expire_timer(table_oid, timer_id);
+            }
+            TimerSubsystemEvent::TrackTimersTable { table_oid } => {
+                self.track_timers_table(table_oid);
+            }
+            TimerSubsystemEvent::UntrackTimersTable { table_oid } => {
+                self.untrack_timers_table(table_oid);
+            }
         }
 
+        true
+    }
+
+    fn create_timer(&mut self, oid: Oid, row: CreateTimerFromRow) {
+        let scoped_timers = if let Some(value) = self.timers.get_mut(&oid) {
+            value
+        } else {
+            warning!(
+                "failed to create timer {}: oid {} is not a tracked table",
+                row.id,
+                oid
+            );
+
+            return;
+        };
+
+        if scoped_timers.contains_key(&row.id) {
+            warning!("timer {} is already tracked", row.id);
+
+            return;
+        }
+
+        let timer_handle = self.timer_handle;
+
         let handle = tokio::spawn(async move {
-            let duration = row.expires_at - Local::now();
+            let now = Local::now();
 
-            time::sleep(duration.to_std().unwrap()).await;
+            if now <= row.expires_at {
+                let duration = now - row.expires_at;
 
-            TimerHandle::enqueue_event(TimerSubsystemEvent::ExpireTimer {
+                time::sleep(duration.to_std().unwrap()).await;
+            }
+
+            timer_handle.enqueue_event(TimerSubsystemEvent::ExpireTimer {
                 table_oid: oid,
                 timer_id: row.id,
             });
@@ -253,13 +356,40 @@ impl Timer {
 
         if let Some(entry) = scoped_timers.remove(&id) {
             let event = TimerFiredEvent {
-                table_oid:  entry.oid,
-                row:        entry.row,
+                table_oid: entry.oid,
+                row: entry.row,
             };
 
-            self.workers_handle.enqueue_event(WorkerSubsystemEvent::TimerFired(event));
+            self.workers_handle
+                .enqueue_event(WorkerSubsystemEvent::TimerFired(event));
         } else {
             error!("timer {} does not exist", id)
+        }
+    }
+
+    fn track_timers_table(&mut self, oid: Oid) {
+        if self.timers.contains_key(&oid) {
+            warning!("table {} is already tracked", oid);
+
+            return;
+        }
+
+        self.timers.insert(oid, Default::default());
+
+        info!("table {} is now tracked", oid)
+    }
+
+    fn untrack_timers_table(&mut self, oid: Oid) {
+        let mut scoped_timers = if let Some(value) = self.timers.remove(&oid) {
+            value
+        } else {
+            warning!("table {} is not tracked", oid);
+
+            return;
+        };
+
+        for (_, entry) in scoped_timers.drain() {
+            entry.handle.abort();
         }
     }
 }

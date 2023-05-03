@@ -3,6 +3,7 @@
 use chrono::prelude::*;
 use pgrx::prelude::*;
 
+use crate::timer::TimerHandle;
 use crate::timer::TimerSubsystemEvent;
 use crate::types::CreateTimerFromRow;
 
@@ -95,7 +96,7 @@ pub fn horloge_timers_after_insert<'a>(
         table_row: new_timer,
     };
 
-    if !crate::timer::TimerHandle::enqueue_event(event) {
+    if !TimerHandle::get().enqueue_event(event) {
         error!("failed to enqueue timer")
     }
 

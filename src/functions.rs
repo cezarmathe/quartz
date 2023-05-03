@@ -4,6 +4,9 @@ use pgrx::prelude::*;
 use pgrx::spi::Error as SpiError;
 use pgrx::spi::SpiClient;
 
+use crate::timer::TimerHandle;
+use crate::timer::TimerSubsystemEvent;
+
 pub fn create_timers_table(rel: &str) {
     if let Err(e) =
         Spi::connect(|mut client| self::create_timers_table_with_client(&mut client, rel))
@@ -47,14 +50,33 @@ fn create_timers_table_with_client<'a>(
                 and n.nspname = {}
             )
             insert into horloge.timer_relations (relid)
-            select oid from table_oid;
+            select oid from table_oid
+            returning relid;
         "#,
         fq, table_arg, schema_arg
     );
 
-    client.update(query.as_str(), None, None).map(|_| ())?;
+    let result = client.update(query.as_str(), None, None)?;
 
-    self::activate_timers_with_client(client, rel)
+    let table_oid = match result.get_one() {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            error!("horloge.create_timers_table(): failed to get table OID: no result");
+        }
+        Err(e) => {
+            error!("horloge.create_timers_table(): failed to get table OID: {}", e);
+        }
+    };
+
+    if let Err(e) = self::activate_timers_with_client(client, rel) {
+        error!("horloge.create_timers_table(): failed to activate timers: {}", e);
+    }
+
+    if !TimerHandle::get().enqueue_event(TimerSubsystemEvent::TrackTimersTable { table_oid }) {
+        error!("horloge.create_timers_table(): failed to enqueue event");
+    }
+
+    Ok(())
 }
 
 pub fn drop_timers_table(rel: &str) {

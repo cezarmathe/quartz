@@ -107,3 +107,12 @@ impl From<CreateTimerFromRow> for TimerRow {
         }
     }
 }
+
+impl From<TimerRow> for CreateTimerFromRow {
+    fn from(value: TimerRow) -> Self {
+        Self {
+            id: value.id,
+            expires_at: value.expires_at,
+        }
+    }
+}
