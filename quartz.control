@@ -1,0 +1,5 @@
+comment = 'quartz:  A PostgreSQL extension that introduces timers'
+default_version = '@CARGO_VERSION@'
+module_pathname = '$libdir/quartz'
+relocatable = false
+superuser = true

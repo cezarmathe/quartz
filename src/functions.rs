@@ -11,7 +11,7 @@ pub fn create_timers_table(rel: &str) {
     if let Err(e) =
         Spi::connect(|mut client| self::create_timers_table_with_client(&mut client, rel))
     {
-        error!("horloge.create_timers_table(): {}", e);
+        error!("quartz.create_timers_table(): {}", e);
     }
 }
 
@@ -49,7 +49,7 @@ fn create_timers_table_with_client<'a>(
                 where c.relname = {}
                 and n.nspname = {}
             )
-            insert into horloge.timer_relations (relid)
+            insert into quartz.timer_relations (relid)
             select oid from table_oid
             returning relid;
         "#,
@@ -61,26 +61,26 @@ fn create_timers_table_with_client<'a>(
     let table_oid = match result.get_one() {
         Ok(Some(value)) => value,
         Ok(None) => {
-            error!("horloge.create_timers_table(): failed to get table OID: no result");
+            error!("quartz.create_timers_table(): failed to get table OID: no result");
         }
         Err(e) => {
-            error!("horloge.create_timers_table(): failed to get table OID: {}", e);
+            error!("quartz.create_timers_table(): failed to get table OID: {}", e);
         }
     };
 
     if let Err(e) = self::activate_timers_with_client(client, rel) {
-        error!("horloge.create_timers_table(): failed to activate timers: {}", e);
+        error!("quartz.create_timers_table(): failed to activate timers: {}", e);
     }
 
     if !TimerHandle::get().enqueue_event(TimerSubsystemEvent::TrackTimersTable { table_oid }) {
-        error!("horloge.create_timers_table(): failed to enqueue event");
+        error!("quartz.create_timers_table(): failed to enqueue event");
     }
 
     Ok(())
 }
 
 pub fn drop_timers_table(rel: &str) {
-    error!("horloge.drop_timers_table(): not implemented");
+    error!("quartz.drop_timers_table(): not implemented");
 }
 
 fn drop_timers_table_with_client<'a>(client: &mut SpiClient<'a>, rel: &str) {
@@ -89,37 +89,37 @@ fn drop_timers_table_with_client<'a>(client: &mut SpiClient<'a>, rel: &str) {
 
 pub fn activate_timers(rel: &str) {
     if let Err(e) = Spi::connect(|mut client| self::activate_timers_with_client(&mut client, rel)) {
-        error!("horloge.activate_timers(): {}", e);
+        error!("quartz.activate_timers(): {}", e);
     }
 }
 
 fn activate_timers_with_client<'a>(client: &mut SpiClient<'a>, rel: &str) -> Result<(), SpiError> {
     let query = format!(
         r#"
-        create or replace trigger horloge_timers_before_insert
+        create or replace trigger quartz_timers_before_insert
             before insert on {}
             for each row
-            execute procedure horloge.horloge_timers_before_insert();
-        create or replace trigger horloge_timers_after_insert
+            execute procedure quartz.quartz_timers_before_insert();
+        create or replace trigger quartz_timers_after_insert
             after insert on {}
             for each row
-            execute procedure horloge.horloge_timers_after_insert();
-        create or replace trigger horloge_timers_before_update
+            execute procedure quartz.quartz_timers_after_insert();
+        create or replace trigger quartz_timers_before_update
             before update on {}
             for each row
-            execute procedure horloge.horloge_timers_before_update();
-        create or replace trigger horloge_timers_after_update
+            execute procedure quartz.quartz_timers_before_update();
+        create or replace trigger quartz_timers_after_update
             after update on {}
             for each row
-            execute procedure horloge.horloge_timers_after_update();
-        create or replace trigger horloge_timers_before_delete
+            execute procedure quartz.quartz_timers_after_update();
+        create or replace trigger quartz_timers_before_delete
             before delete on {}
             for each row
-            execute procedure horloge.horloge_timers_before_delete();
-        create or replace trigger horloge_timers_after_delete
+            execute procedure quartz.quartz_timers_before_delete();
+        create or replace trigger quartz_timers_after_delete
             after delete on {}
             for each row
-            execute procedure horloge.horloge_timers_after_delete();
+            execute procedure quartz.quartz_timers_after_delete();
         "#,
         rel, rel, rel, rel, rel, rel
     );
@@ -130,7 +130,7 @@ fn activate_timers_with_client<'a>(client: &mut SpiClient<'a>, rel: &str) -> Res
 pub fn deactivate_timers(rel: &str) {
     if let Err(e) = Spi::connect(|mut client| self::deactivate_timers_with_client(&mut client, rel))
     {
-        error!("horloge.deactivate_timers(): {}", e);
+        error!("quartz.deactivate_timers(): {}", e);
     }
 }
 
@@ -140,12 +140,12 @@ fn deactivate_timers_with_client<'a>(
 ) -> Result<(), SpiError> {
     let query = format!(
         r#"
-        drop trigger if exists horloge_timers_before_insert on {};
-        drop trigger if exists horloge_timers_after_insert on {};
-        drop trigger if exists horloge_timers_before_update on {};
-        drop trigger if exists horloge_timers_after_update on {};
-        drop trigger if exists horloge_timers_before_delete on {};
-        drop trigger if exists horloge_timers_after_delete on {};
+        drop trigger if exists quartz_timers_before_insert on {};
+        drop trigger if exists quartz_timers_after_insert on {};
+        drop trigger if exists quartz_timers_before_update on {};
+        drop trigger if exists quartz_timers_after_update on {};
+        drop trigger if exists quartz_timers_before_delete on {};
+        drop trigger if exists quartz_timers_after_delete on {};
         "#,
         rel, rel, rel, rel, rel, rel
     );

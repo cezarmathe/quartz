@@ -26,14 +26,14 @@ macro_rules! assert_row_trigger_event {
     };
 }
 
-pub fn horloge_timers_before_insert<'a>(
+pub fn quartz_timers_before_insert<'a>(
     trigger: &'a PgTrigger<'a>,
 ) -> TriggerResult<'a, impl WhoAllocated> {
     let now = Local::now();
 
     assert_row_trigger_event!(
         trigger.event(),
-        horloge_timers_before_insert => {
+        quartz_timers_before_insert => {
             fired_by_insert,
             fired_before,
             fired_for_row
@@ -63,12 +63,12 @@ pub fn horloge_timers_before_insert<'a>(
     Ok(Some(new_row))
 }
 
-pub fn horloge_timers_after_insert<'a>(
+pub fn quartz_timers_after_insert<'a>(
     trigger: &'a PgTrigger<'a>,
 ) -> TriggerResult<'a, impl WhoAllocated> {
     assert_row_trigger_event!(
         trigger.event(),
-        horloge_timers_after_insert => {
+        quartz_timers_after_insert => {
             fired_by_insert,
             fired_after,
             fired_for_row
@@ -88,7 +88,7 @@ pub fn horloge_timers_after_insert<'a>(
 
     let relation_oid = match trigger.relation().map(|rel| rel.oid()) {
         Ok(value) => value,
-        Err(e) => error!("horloge_timers_after_insert: relation ID is unexpectedly unavailable: {}", e),
+        Err(e) => error!("quartz_timers_after_insert: relation ID is unexpectedly unavailable: {}", e),
     };
 
     let event = TimerSubsystemEvent::CreateTimer {
@@ -103,19 +103,19 @@ pub fn horloge_timers_after_insert<'a>(
     Ok(Some(new_row))
 }
 
-pub fn horloge_timers_before_update<'a>(
+pub fn quartz_timers_before_update<'a>(
     trigger: &'a PgTrigger<'a>,
 ) -> TriggerResult<'a, impl WhoAllocated> {
     assert_row_trigger_event!(
         trigger.event(),
-        horloge_timers_before_update => {
+        quartz_timers_before_update => {
             fired_by_update,
             fired_before,
             fired_for_row
         }
     );
 
-    notice!("horloge.horloge_timers_before_update: updates are not yet supported");
+    notice!("quartz.quartz_timers_before_update: updates are not yet supported");
 
     // todo: validate
     // - parse Timer out of new
@@ -126,19 +126,19 @@ pub fn horloge_timers_before_update<'a>(
     Ok(trigger.new())
 }
 
-pub fn horloge_timers_after_update<'a>(
+pub fn quartz_timers_after_update<'a>(
     trigger: &'a PgTrigger<'a>,
 ) -> TriggerResult<'a, impl WhoAllocated> {
     assert_row_trigger_event!(
         trigger.event(),
-        horloge_timers_before_update => {
+        quartz_timers_before_update => {
             fired_by_update,
             fired_after,
             fired_for_row
         }
     );
 
-    notice!("horloge.horloge_timers_after_update: updates are not yet supported");
+    notice!("quartz.quartz_timers_after_update: updates are not yet supported");
 
     // todo: queue update
     // - parse Timer out of new
@@ -151,19 +151,19 @@ pub fn horloge_timers_after_update<'a>(
     Ok(trigger.new())
 }
 
-pub fn horloge_timers_before_delete<'a>(
+pub fn quartz_timers_before_delete<'a>(
     trigger: &'a PgTrigger<'a>,
 ) -> TriggerResult<'a, impl WhoAllocated> {
     assert_row_trigger_event!(
         trigger.event(),
-        horloge_timers_before_update => {
+        quartz_timers_before_update => {
             fired_by_delete,
             fired_before,
             fired_for_row
         }
     );
 
-    notice!("horloge.horloge_timers_before_delete: deletes are not yet supported");
+    notice!("quartz.quartz_timers_before_delete: deletes are not yet supported");
 
     // todo: validate
     // - parse Timer out of old
@@ -173,19 +173,19 @@ pub fn horloge_timers_before_delete<'a>(
     Ok(trigger.old())
 }
 
-pub fn horloge_timers_after_delete<'a>(
+pub fn quartz_timers_after_delete<'a>(
     trigger: &'a PgTrigger<'a>,
 ) -> TriggerResult<'a, impl WhoAllocated> {
     assert_row_trigger_event!(
         trigger.event(),
-        horloge_timers_before_update => {
+        quartz_timers_before_update => {
             fired_by_delete,
             fired_after,
             fired_for_row
         }
     );
 
-    notice!("horloge.horloge_timers_after_delete: deletes are not yet supported");
+    notice!("quartz.quartz_timers_after_delete: deletes are not yet supported");
 
     // todo: queue delete
     // - parse Timer out of old

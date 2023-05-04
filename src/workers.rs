@@ -22,25 +22,25 @@ use crate::types::TimerRow;
 
 /// Initialize the workers subsystem.
 pub(crate) fn pg_init() {
-    log!("horloge-workers: pg_init");
+    log!("quartz-workers: pg_init");
 
     pg_shmem_init!(WORKER_QUEUE);
 
     let worker_count = match std::thread::available_parallelism() {
         Ok(value) => value.get() / 2, // fixme??
         Err(e) => {
-            warning!("horloge-workers: pg_init failed to determine available parallelism (error: {}), using 1", e);
+            warning!("quartz-workers: pg_init failed to determine available parallelism (error: {}), using 1", e);
 
             1
         }
     };
 
     for i in 0..worker_count {
-        BackgroundWorkerBuilder::new(format!("horloge-worker-{}", i).as_str())
-            .set_library("horloge")
-            .set_function("horloge_worker_main")
+        BackgroundWorkerBuilder::new(format!("quartz-worker-{}", i).as_str())
+            .set_library("quartz")
+            .set_function("quartz_worker_main")
             .set_argument((i as i32).into_datum()) // worker ID
-            .set_type("horloge-worker")
+            .set_type("quartz-worker")
             .set_start_time(BgWorkerStartTime::RecoveryFinished)
             .set_restart_time(StdDuration::from_secs(1).into())
             .enable_shmem_access(None)
@@ -53,7 +53,7 @@ type WorkerEventsQueueType = MpMcQueue<WorkerSubsystemEvent, 128>;
 
 /// The shared queue used for communicating events to the workers subsystem.
 static WORKER_QUEUE: SharedObject<WorkerEventsQueueType> =
-    SharedObject::new("horloge-workers-queue");
+    SharedObject::new("quartz-workers-queue");
 
 /// WorkerEvent is an event that can be sent to the workers subsystem.
 pub enum WorkerSubsystemEvent {
@@ -86,10 +86,10 @@ impl WorkersHandle {
 
 #[pg_guard]
 #[no_mangle]
-pub extern "C" fn horloge_worker_main(arg: pg_sys::Datum) {
+pub extern "C" fn quartz_worker_main(arg: pg_sys::Datum) {
     let worker_id = unsafe { i32::from_datum(arg, false) }.unwrap();
 
-    log!("horloge-worker-{}: starting", worker_id);
+    log!("quartz-worker-{}: starting", worker_id);
 
     BackgroundWorker::attach_signal_handlers(SignalWakeFlags::SIGHUP | SignalWakeFlags::SIGTERM);
     BackgroundWorker::connect_worker_to_spi(config::SPI_DATABASE_NAME, config::SPI_USER_NAME);
@@ -183,7 +183,7 @@ impl Worker {
                 )?;
 
                 log!(
-                    "horloge-worker-{}: timer {} in \"{}\".\"{}\" fired",
+                    "quartz-worker-{}: timer {} in \"{}\".\"{}\" fired",
                     self.worker_id,
                     row.id,
                     schema,
@@ -196,7 +196,7 @@ impl Worker {
 
         if let Err(e) = result {
             error!(
-                "horloge-worker-{}: process timer {} fired: {}",
+                "quartz-worker-{}: process timer {} fired: {}",
                 self.worker_id, row.id, e
             );
         }

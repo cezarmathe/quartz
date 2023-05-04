@@ -592,18 +592,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "horloge"
-version = "0.0.0"
-dependencies = [
- "chrono",
- "heapless",
- "once_cell",
- "pgrx",
- "pgrx-tests",
- "tokio",
-]
-
-[[package]]
 name = "iana-time-zone"
 version = "0.1.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1093,6 +1081,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b63bdb0cd06f1f4dedf69b254734f9b45af66e4a031e42a7480257d9898b435"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "quartz"
+version = "0.0.0"
+dependencies = [
+ "chrono",
+ "heapless",
+ "once_cell",
+ "pgrx",
+ "pgrx-tests",
+ "tokio",
 ]
 
 [[package]]

@@ -1,7 +1,7 @@
 // src/lib.rs
 
 mod commands;  /// Internal SQL query commands wrapping SPI calls.
-mod config;    /// Configuration for the horloge extension.
+mod config;    /// Configuration for the quartz extension.
 mod functions; /// SQL functions.
 mod shmem;     /// Shared memory.
 mod timer;     /// Timer implementation.
@@ -29,7 +29,7 @@ pub extern "C" fn _PG_init() {
 /// This module manages the SQL schema for this extension, and the exported
 /// triggers and functions.
 #[pg_schema]
-mod horloge {
+mod quartz {
     use pgrx::prelude::*;
 
     /// Export trigger definitions more conveniently.
@@ -45,12 +45,12 @@ mod horloge {
     }
 
     export_triggers! {
-        horloge_timers_before_insert => crate::triggers::horloge_timers_before_insert,
-        horloge_timers_after_insert  => crate::triggers::horloge_timers_after_insert,
-        horloge_timers_before_update => crate::triggers::horloge_timers_before_update,
-        horloge_timers_after_update  => crate::triggers::horloge_timers_after_update,
-        horloge_timers_before_delete => crate::triggers::horloge_timers_before_delete,
-        horloge_timers_after_delete  => crate::triggers::horloge_timers_after_delete
+        quartz_timers_before_insert => crate::triggers::quartz_timers_before_insert,
+        quartz_timers_after_insert  => crate::triggers::quartz_timers_after_insert,
+        quartz_timers_before_update => crate::triggers::quartz_timers_before_update,
+        quartz_timers_after_update  => crate::triggers::quartz_timers_after_update,
+        quartz_timers_before_delete => crate::triggers::quartz_timers_before_delete,
+        quartz_timers_after_delete  => crate::triggers::quartz_timers_after_delete
     }
 
     /// Activate timers for a relation.

@@ -29,15 +29,15 @@ use crate::workers::WorkersHandle;
 
 /// Initialize the timer subsystem.
 pub fn pg_init() {
-    log!("horloge-timer: pg_init");
+    log!("quartz-timer: pg_init");
 
     pg_shmem_init!(TIMER_EVENTS_QUEUE);
 
-    BackgroundWorkerBuilder::new("horloge-timer")
-        .set_library("horloge")
-        .set_function("horloge_timer_main")
+    BackgroundWorkerBuilder::new("quartz-timer")
+        .set_library("quartz")
+        .set_function("quartz_timer_main")
         .set_argument(0.into_datum()) // can we use this for something?
-        .set_type("horloge-timer")
+        .set_type("quartz-timer")
         .set_start_time(BgWorkerStartTime::RecoveryFinished)
         .set_restart_time(StdDuration::from_secs(1).into())
         .enable_shmem_access(None)
@@ -50,7 +50,7 @@ type TimerEventsQueueType = MpMcQueue<TimerSubsystemEvent, 128>;
 
 /// The queue of events that will be processed by the timer subsystem.
 static TIMER_EVENTS_QUEUE: SharedObject<TimerEventsQueueType> =
-    SharedObject::new("horloge-timer-create-timer-queue");
+    SharedObject::new("quartz-timer-create-timer-queue");
 
 /// Events that can be consumed by the timer subsystem.
 pub enum TimerSubsystemEvent {
@@ -119,8 +119,8 @@ impl TimerHandle {
 /// Timer instance and blocks on it's run method.
 #[pg_guard]
 #[no_mangle]
-pub extern "C" fn horloge_timer_main(_arg: pg_sys::Datum) {
-    log!("horloge-timer: starting");
+pub extern "C" fn quartz_timer_main(_arg: pg_sys::Datum) {
+    log!("quartz-timer: starting");
 
     BackgroundWorker::attach_signal_handlers(SignalWakeFlags::SIGHUP | SignalWakeFlags::SIGTERM);
     BackgroundWorker::connect_worker_to_spi(config::SPI_DATABASE_NAME, config::SPI_USER_NAME);
@@ -128,11 +128,11 @@ pub extern "C" fn horloge_timer_main(_arg: pg_sys::Datum) {
     let mut timer = Timer::new(TIMER_EVENTS_QUEUE.get());
 
     if let Err(e) = timer.initialize_extension() {
-        error!("horloge-timer: failed to initialize schema: {}", e);
+        error!("quartz-timer: failed to initialize schema: {}", e);
     }
 
     if let Err(e) = timer.initialize() {
-        error!("horloge-timer: failed to initialize: {}", e);
+        error!("quartz-timer: failed to initialize: {}", e);
     }
 
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -144,7 +144,7 @@ pub extern "C" fn horloge_timer_main(_arg: pg_sys::Datum) {
 
     runtime.block_on(timer.run());
 
-    log!("horloge-timer: bye bye");
+    log!("quartz-timer: bye bye");
 }
 
 /// A timer entry is an entry in the timer subsystem that tracks the time for
@@ -178,7 +178,7 @@ impl Timer {
     fn initialize_extension(&mut self) -> Result<(), SpiError> {
         BackgroundWorker::transaction(|| {
             Spi::connect(|mut client| {
-                client.update("create extension if not exists horloge", None, None)
+                client.update("create extension if not exists quartz", None, None)
             })
             .map(|_| ())
         })

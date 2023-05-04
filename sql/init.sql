@@ -2,16 +2,16 @@
 --- src/init.sql
 ---
 
-create table horloge.timer_relations (
+create table quartz.timer_relations (
     relid oid primary key
 );
 
-create function horloge.check_relation_is_table()
+create function quartz.check_relation_is_table()
 returns trigger
 as $$
 begin
-    if (TG_TABLE_SCHEMA != 'horloge' or TG_TABLE_NAME != 'timer_relations') then
-        raise exception 'horloge.ensure_relid_is_table(): must be used only on the "horloge.timer_tables" table';
+    if (TG_TABLE_SCHEMA != 'quartz' or TG_TABLE_NAME != 'timer_relations') then
+        raise exception 'quartz.ensure_relid_is_table(): must be used only on the "quartz.timer_tables" table';
     end if;
 
     if not exists (
@@ -24,5 +24,5 @@ end;
 $$ language plpgsql;
 
 create trigger check_relation_is_table
-    before insert or update on horloge.timer_relations
-    for each row execute function horloge.check_relation_is_table();
+    before insert or update on quartz.timer_relations
+    for each row execute function quartz.check_relation_is_table();
