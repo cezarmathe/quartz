@@ -37,9 +37,9 @@ fn create_timers_table_with_client<'a>(
         r#"
             create table {} (
                 id bigint generated always as identity primary key,
-                expires_at timestamp not null,
-                fired_at timestamp,
-                completed_at timestamp
+                expires_at timestamp with time zone not null,
+                fired_at timestamp with time zone,
+                completed_at timestamp with time zone
             );
 
             with table_oid as (
@@ -56,7 +56,7 @@ fn create_timers_table_with_client<'a>(
         fq, table_arg, schema_arg
     );
 
-    let result = client.update(query.as_str(), None, None)?;
+    let result = client.update(query.as_str(), None, None)?.first();
 
     let table_oid = match result.get_one() {
         Ok(Some(value)) => value,

@@ -344,7 +344,7 @@ impl Timer {
             let now = Local::now();
 
             if now <= row.expires_at {
-                let duration = now - row.expires_at;
+                let duration = row.expires_at - now;
 
                 log!(
                     "quartz-timer: timer {} ({}) is due in {}",

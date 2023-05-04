@@ -36,7 +36,7 @@ impl<'a> TryFrom<&'a PgHeapTuple<'a, AllocatedByPostgres>> for TimerRow {
             Err(e) => return Err(format!("unexpected error: {}", e).into()),
         };
 
-        let expires_at = match tuple.get_by_name::<Timestamp>("expires_at") {
+        let expires_at = match tuple.get_by_name::<TimestampWithTimeZone>("expires_at") {
             Ok(Some(value)) => crate::timestamp::pg_to_chrono(value),
             Ok(None) => return Err("expires_at must not be null".into()),
             Err(TryFromDatumError::NoSuchAttributeName(_)) => return Err("missing expires_at column".into()),
@@ -44,7 +44,7 @@ impl<'a> TryFrom<&'a PgHeapTuple<'a, AllocatedByPostgres>> for TimerRow {
             Err(e) => return Err(format!("unexpected error: {}", e).into()),
         };
 
-        let fired_at = match tuple.get_by_name::<Timestamp>("fired_at") {
+        let fired_at = match tuple.get_by_name::<TimestampWithTimeZone>("fired_at") {
             Ok(Some(value)) => Some(crate::timestamp::pg_to_chrono(value)),
             Ok(None) => None,
             Err(TryFromDatumError::NoSuchAttributeName(_)) => return Err("missing fired_at column".into()),
@@ -52,7 +52,7 @@ impl<'a> TryFrom<&'a PgHeapTuple<'a, AllocatedByPostgres>> for TimerRow {
             Err(e) => return Err(format!("unexpected error: {}", e).into()),
         };
 
-        let completed_at = match tuple.get_by_name::<Timestamp>("completed_at") {
+        let completed_at = match tuple.get_by_name::<TimestampWithTimeZone>("completed_at") {
             Ok(Some(value)) => Some(crate::timestamp::pg_to_chrono(value)),
             Ok(None) => None,
             Err(TryFromDatumError::NoSuchAttributeName(_)) => return Err("missing completed_at column".into()),

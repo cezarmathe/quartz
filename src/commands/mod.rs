@@ -1,11 +1,9 @@
 // src/commands.rs
 
 use pgrx::pg_sys::Oid;
+use pgrx::prelude::*;
 use pgrx::spi::Error as SpiError;
 use pgrx::spi::SpiClient;
-use pgrx::IntoDatum;
-use pgrx::PgOid;
-use pgrx::Timestamp;
 
 use crate::timestamp;
 use crate::types::TimerRow;
@@ -116,16 +114,16 @@ pub fn find_timers_in_table(
             .expect("commands::find_timers_in_table(): no id")
             .expect("commands::find_timers_in_table(): id is null");
         let expires_at = tuple
-            .get::<Timestamp>(2)
+            .get::<TimestampWithTimeZone>(2)
             .expect("commands::find_timers_in_table(): no expires_at")
             .map(timestamp::pg_to_chrono)
             .expect("commands::find_timers_in_table(): expires_at is null");
         let fired_at = tuple
-            .get::<Timestamp>(3)
+            .get::<TimestampWithTimeZone>(3)
             .expect("commands::find_timers_in_table(): no fired_at")
             .map(timestamp::pg_to_chrono);
         let completed_at = tuple
-            .get::<Timestamp>(4)
+            .get::<TimestampWithTimeZone>(4)
             .expect("commands::find_timers_in_table(): no completed_at")
             .map(timestamp::pg_to_chrono);
 
