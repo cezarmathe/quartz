@@ -311,26 +311,34 @@ impl Timer {
         true
     }
 
-    fn create_timer(&mut self, oid: Oid, row: CreateTimerFromRow) {
-        let scoped_timers = if let Some(value) = self.timers.get_mut(&oid) {
+    fn create_timer(&mut self, table_oid: Oid, row: CreateTimerFromRow) {
+        let scoped_timers = if let Some(value) = self.timers.get_mut(&table_oid) {
             value
         } else {
             warning!(
-                "failed to create timer {}: oid {} is not a tracked table",
+                "quartz-timer: failed to create timer {} ({}): table is not tracked",
                 row.id,
-                oid
+                table_oid
             );
 
             return;
         };
 
         if scoped_timers.contains_key(&row.id) {
-            warning!("timer {} is already tracked", row.id);
+            warning!(
+                "quartz-timer: timer {} ({}) is already tracked",
+                row.id,
+                table_oid
+            );
 
             return;
         }
 
         let timer_handle = self.timer_handle;
+
+        let row: TimerRow = row.into();
+        let row_id = row.id;
+        let table_oid = table_oid;
 
         let handle = tokio::spawn(async move {
             let now = Local::now();
@@ -338,19 +346,37 @@ impl Timer {
             if now <= row.expires_at {
                 let duration = now - row.expires_at;
 
+                log!(
+                    "quartz-timer: timer {} ({}) is due in {}",
+                    row_id,
+                    table_oid,
+                    duration,
+                );
+
                 time::sleep(duration.to_std().unwrap()).await;
+            } else {
+                log!(
+                    "quartz-timer: timer {} ({}) is already expired",
+                    row_id,
+                    table_oid,
+                );
             }
 
             timer_handle.enqueue_event(TimerSubsystemEvent::ExpireTimer {
-                table_oid: oid,
+                table_oid,
                 timer_id: row.id,
             });
         })
         .abort_handle();
 
-        let row: TimerRow = row.into();
-
-        scoped_timers.insert(row.id, TimerEntry { oid, row, handle });
+        scoped_timers.insert(
+            row.id,
+            TimerEntry {
+                oid: table_oid,
+                row,
+                handle,
+            },
+        );
     }
 
     fn expire_timer(&mut self, oid: Oid, id: i64) {

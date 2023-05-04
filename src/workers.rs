@@ -12,8 +12,10 @@ use pgrx::shmem::*;
 use tokio::time;
 use tokio::time::MissedTickBehavior;
 
-use std::time::Duration;
+use std::time::Duration as StdDuration;
 
+use crate::commands;
+use crate::commands::TimerTableData;
 use crate::config;
 use crate::shmem::SharedObject;
 use crate::types::TimerRow;
@@ -35,10 +37,12 @@ pub(crate) fn pg_init() {
 
     for i in 0..worker_count {
         BackgroundWorkerBuilder::new(format!("horloge-worker-{}", i).as_str())
+            .set_library("horloge")
             .set_function("horloge_worker_main")
             .set_argument((i as i32).into_datum()) // worker ID
-            .set_library("horloge")
             .set_type("horloge-worker")
+            .set_start_time(BgWorkerStartTime::RecoveryFinished)
+            .set_restart_time(StdDuration::from_secs(1).into())
             .enable_shmem_access(None)
             .enable_spi_access()
             .load();
@@ -113,55 +117,21 @@ impl Worker {
     }
 
     async fn run(&mut self) {
-        let mut poll_term_interval = time::interval(Duration::from_secs(1));
+        let mut poll_term_interval = time::interval(StdDuration::from_secs(1));
         poll_term_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        let mut poll_timers_interval = time::interval(Duration::from_millis(1));
+        let mut poll_timers_interval = time::interval(StdDuration::from_millis(1));
         poll_timers_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-        let on_poll_term_inverval = || {
-            if BackgroundWorker::sigterm_received() {
-                return false;
-            }
-
-            if BackgroundWorker::sighup_received() {
-                // on SIGHUP, you might want to reload some external configuration or something
-            }
-
-            return true;
-        };
-
-        let on_poll_timers_interval = || {
-            let event = if let Some(value) = self.queue.dequeue() {
-                value
-            } else {
-                return;
-            };
-
-            log!("horloge-worker-{}: got event", self.worker_id);
-
-            use WorkerSubsystemEvent::*;
-            match event {
-                TimerFired(event) => {
-                    log!(
-                        "horloge-worker-{}: timer {}:{} fired",
-                        self.worker_id,
-                        event.table_oid,
-                        event.row.id
-                    );
-                }
-            }
-        };
 
         loop {
             tokio::select! {
                 _ = poll_term_interval.tick() => {
-                    if !on_poll_term_inverval() {
+                    if !self.on_poll_term() {
                         break;
                     }
                 }
                 _ = poll_timers_interval.tick() => {
-                    on_poll_timers_interval();
+                    self.on_poll_events();
                 }
             }
         }
@@ -170,5 +140,65 @@ impl Worker {
             "Background Worker '{}' is exiting",
             BackgroundWorker::get_name()
         );
+    }
+
+    fn on_poll_term(&mut self) -> bool {
+        if BackgroundWorker::sigterm_received() {
+            return false;
+        }
+
+        if BackgroundWorker::sighup_received() {
+            // on SIGHUP, you might want to reload some external configuration or something
+        }
+
+        return true;
+    }
+
+    fn on_poll_events(&mut self) {
+        let event = if let Some(value) = self.queue.dequeue() {
+            value
+        } else {
+            return;
+        };
+
+        use WorkerSubsystemEvent::*;
+        match event {
+            TimerFired(event) => self.process_timer_fired(event),
+        }
+    }
+
+    fn process_timer_fired(&mut self, event: TimerFiredEvent) {
+        let TimerFiredEvent { table_oid, row } = event;
+
+        let result: Result<(), spi::Error> = BackgroundWorker::transaction(|| {
+            Spi::connect(|mut client| {
+                let TimerTableData { schema, table, .. } =
+                    commands::find_timer_table(&client, table_oid)?.expect("Timer table not found");
+
+                commands::mark_timer_as_fired(
+                    &mut client,
+                    schema.as_str(),
+                    table.as_str(),
+                    row.id,
+                )?;
+
+                log!(
+                    "horloge-worker-{}: timer {} in \"{}\".\"{}\" fired",
+                    self.worker_id,
+                    row.id,
+                    schema,
+                    table
+                );
+
+                Ok(())
+            })
+        });
+
+        if let Err(e) = result {
+            error!(
+                "horloge-worker-{}: process timer {} fired: {}",
+                self.worker_id, row.id, e
+            );
+        }
     }
 }
