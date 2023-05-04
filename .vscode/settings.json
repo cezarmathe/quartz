@@ -1,6 +1,16 @@
 {
     "cSpell.words": [
-        "horloge"
+        "bgworkers",
+        "chrono",
+        "datetime",
+        "horloge",
+        "localtimestamp",
+        "pgrx",
+        "relid",
+        "relkind",
+        "shmem",
+        "sighup",
+        "sigterm"
     ],
     "rust-analyzer.imports.granularity.group": "item",
 }
