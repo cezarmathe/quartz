@@ -192,6 +192,8 @@ impl Timer {
 
             warning!("quartz-timer: found {} timer tables", timer_tables.len());
 
+            // fixme: this solution can potentially fail if there are too
+            // many timers that need loading, because the queue is quite small.
             for timer_table in timer_tables {
                 let TimerTableData {
                     relid,
